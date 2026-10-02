@@ -1,0 +1,176 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>ComfyUI Launcher</title>
+<style>
+  :root{
+    --bg:#0f1115; --panel:#171a21; --panel2:#1d212b; --line:#2a2f3c;
+    --text:#e6e9f0; --muted:#8b93a7; --accent:#7c8cff; --ok:#3fd68f; --warn:#ffb454; --err:#ff6b81;
+  }
+  *{box-sizing:border-box;margin:0;padding:0}
+  body{background:var(--bg);color:var(--text);font:14px/1.5 -apple-system,"Segoe UI",Roboto,"Noto Sans KR",sans-serif;padding:24px}
+  h1{font-size:20px;font-weight:700;display:flex;align-items:center;gap:10px;margin-bottom:18px}
+  h1 .dot{width:12px;height:12px;border-radius:50%;background:var(--err);box-shadow:0 0 8px var(--err)}
+  h1 .dot.on{background:var(--ok);box-shadow:0 0 8px var(--ok)}
+  .grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(220px,1fr));gap:14px;margin-bottom:16px}
+  .card{background:var(--panel);border:1px solid var(--line);border-radius:12px;padding:14px 16px}
+  .card .label{color:var(--muted);font-size:12px;letter-spacing:.04em;text-transform:uppercase}
+  .card .value{font-size:24px;font-weight:700;margin-top:4px}
+  .card .sub{color:var(--muted);font-size:12px;margin-top:2px}
+  .bar{height:8px;background:var(--panel2);border-radius:4px;margin-top:10px;overflow:hidden}
+  .bar>i{display:block;height:100%;background:linear-gradient(90deg,var(--accent),#b18cff);border-radius:4px;transition:width .3s}
+  .panel{background:var(--panel);border:1px solid var(--line);border-radius:12px;padding:16px;margin-bottom:16px}
+  .panel h2{font-size:13px;color:var(--muted);font-weight:600;letter-spacing:.05em;text-transform:uppercase;margin-bottom:10px}
+  .controls{display:flex;gap:10px;flex-wrap:wrap}
+  button{background:var(--panel2);color:var(--text);border:1px solid var(--line);border-radius:8px;padding:9px 18px;font-size:14px;font-weight:600;cursor:pointer;transition:.15s}
+  button:hover{border-color:var(--accent);color:var(--accent)}
+  button:disabled{opacity:.4;cursor:default}
+  button.primary{background:var(--accent);border-color:var(--accent);color:#fff}
+  button.primary:hover{filter:brightness(1.1)}
+  button.danger{border-color:var(--err);color:var(--err)}
+  .progress-wrap{margin-top:4px}
+  .progress-title{display:flex;justify-content:space-between;color:var(--muted);font-size:12px;margin-bottom:6px}
+  .bar.big{height:14px}
+  ul.queue{list-style:none}
+  ul.queue li{padding:5px 0;border-bottom:1px dashed var(--line);display:flex;gap:8px;align-items:center}
+  ul.queue li:last-child{border-bottom:0}
+  ul.queue .tag{font-size:11px;padding:1px 8px;border-radius:10px;background:var(--panel2);color:var(--muted)}
+  ul.queue .tag.run{color:var(--ok);border:1px solid var(--ok)}
+  .empty{color:var(--muted);font-size:13px}
+  .footer{color:var(--muted);font-size:12px;text-align:center;margin-top:8px}
+  a{color:var(--accent);text-decoration:none}
+  #toast{position:fixed;bottom:20px;right:20px;background:var(--panel2);border:1px solid var(--line);border-radius:10px;padding:10px 16px;display:none;font-size:13px}
+</style>
+</head>
+<body>
+<h1><span class="dot" id="dot"></span> ComfyUI Launcher <span style="color:var(--muted);font-size:13px;font-weight:400" id="hdr-url"></span></h1>
+
+<div class="panel">
+  <div class="controls">
+    <button class="primary" id="btn-on" onclick="ctl('/api/start')">▶ ComfyUI 켜기</button>
+    <button class="danger" id="btn-off" onclick="ctl('/api/stop')">⏹ 끄기 (메모리 반납)</button>
+    <button id="btn-restart" onclick="restart()">↻ 재시작</button>
+    <button id="btn-free" onclick="ctl('/api/free')">🧹 메모리만 해제</button>
+    <button onclick="window.open(document.getElementById('comfy-link').href,'_blank')" id="btn-open">🌐 ComfyUI 웹 UI 열기</button>
+  </div>
+</div>
+
+<div class="grid">
+  <div class="card"><div class="label">상태</div><div class="value" id="st-state">OFF</div><div class="sub" id="st-pid">—</div></div>
+  <div class="card"><div class="label">프로세스 메모리 (Footprint)</div><div class="value" id="st-mem">—</div><div class="sub">macOS 통합 메모리 기준</div></div>
+  <div class="card"><div class="label">GPU (VRAM)</div><div class="value" id="st-vram">—</div>
+    <div class="bar"><i id="vram-bar" style="width:0%"></i></div><div class="sub" id="st-vram-sub">—</div></div>
+  <div class="card"><div class="label">버전</div><div class="value" style="font-size:16px" id="st-ver">—</div><div class="sub" id="st-dev">—</div></div>
+</div>
+
+<div class="panel progress-wrap">
+  <h2>진행 상황 (실시간)</h2>
+  <div class="progress-title"><span id="pg-label">대기 중</span><span id="pg-pct"></span></div>
+  <div class="bar big"><i id="pg-bar" style="width:0%"></i></div>
+  <div class="sub" style="color:var(--muted);font-size:12px;margin-top:6px" id="pg-node"></div>
+</div>
+
+<div class="panel">
+  <h2>대기열</h2>
+  <ul class="queue" id="queue-list"><li class="empty">—</li></ul>
+</div>
+
+<div class="footer">
+  comfy-launcher · 헤드리스: <code>comfy-launcher start|stop|status --json</code> ·
+  <a id="comfy-link" href="#" target="_blank">ComfyUI 서버</a>
+</div>
+<div id="toast"></div>
+
+<script>
+let ws=null, wsTimer=null, lastQueue=0;
+const $=id=>document.getElementById(id);
+
+function toast(msg,ok=true){const t=$('toast');t.textContent=msg;t.style.display='block';
+  t.style.borderColor=ok?'var(--ok)':'var(--err)';setTimeout(()=>t.style.display='none',3500);}
+
+async function refresh(){
+  try{
+    const s=await (await fetch('/api/status')).json();
+    $('hdr-url').textContent=s.url;
+    $('comfy-link').href=s.url;
+    $('dot').classList.toggle('on',s.running);
+    $('st-state').textContent=s.running?'ON':'OFF';
+    $('st-state').style.color=s.running?'var(--ok)':'var(--err)';
+    $('st-pid').textContent=s.running?('PID '+s.pid):'—';
+    $('st-mem').textContent=s.running?Math.round(s.footprint_mb)+' MB':'—';
+    if(s.running&&s.vram_total_mb>0){
+      const used=s.vram_total_mb-s.vram_free_mb;
+      $('st-vram').textContent=Math.round(used)+' / '+Math.round(s.vram_total_mb)+' MB';
+      $('vram-bar').style.width=(used/s.vram_total_mb*100).toFixed(1)+'%';
+      $('st-vram-sub').textContent='여유 '+Math.round(s.vram_free_mb)+' MB';
+    } else { $('st-vram').textContent='—'; $('vram-bar').style.width='0%'; $('st-vram-sub').textContent='—'; }
+    $('st-ver').textContent=s.running?('ComfyUI '+(s.comfyui_version||'?')):'—';
+    $('st-dev').textContent=s.device||'—';
+    // 대기열 목록
+    const list=$('queue-list'); list.innerHTML='';
+    const items=[
+      ...s.running_titles.map(t=>['▶',t,'run']),
+      ...s.pending_titles.map(t=>['⏳',t,''])
+    ];
+    if(!items.length) list.innerHTML='<li class="empty">큐가 비어 있습니다</li>';
+    for(const [mark,title,cls] of items){
+      const li=document.createElement('li');
+      li.innerHTML=`<span class="tag ${cls}">${mark}</span> ${title}`;
+      list.appendChild(li);
+    }
+    lastQueue=s.queue_running+s.queue_pending;
+    if(s.running) connectWS(s.url); else closeWS();
+  }catch(e){ $('st-state').textContent='런처 오류'; }
+}
+setInterval(refresh,2000); refresh();
+
+function closeWS(){ if(ws){ws.onclose=null;ws.close();ws=null;} if(wsTimer){clearTimeout(wsTimer);wsTimer=null;} }
+function connectWS(base){
+  if(ws) return;
+  try{
+    ws=new WebSocket(base.replace('http','ws')+'/ws?clientId=launcher-ui');
+    ws.onmessage=ev=>{
+      const m=JSON.parse(ev.data);
+      if(m.type==='progress'){
+        const pct=m.data.max?Math.round(m.data.value/m.data.max*100):0;
+        $('pg-label').textContent='샘플링 진행 중';
+        $('pg-pct').textContent=m.data.value+' / '+m.data.max+' ('+pct+'%)';
+        $('pg-bar').style.width=pct+'%';
+      } else if(m.type==='executing'){
+        if(m.data.node) { $('pg-node').textContent='노드 실행: '+m.data.node; $('pg-bar').style.width='0%'; $('pg-pct').textContent=''; }
+        else { $('pg-label').textContent='완료'; $('pg-bar').style.width='100%'; $('pg-node').textContent=''; setTimeout(()=>{$('pg-label').textContent='대기 중';$('pg-bar').style.width='0%';},2000); }
+      } else if(m.type==='status'){
+        const q=m.data?.status?.exec_info?.queue_remaining;
+        if(q!==undefined&&q===0&&$('pg-label').textContent==='샘플링 진행 중'){
+          $('pg-label').textContent='완료';
+        }
+      } else if(m.type==='execution_error'){
+        $('pg-label').textContent='실행 오류';
+        $('pg-label').style.color='var(--err)';
+        setTimeout(()=>$('pg-label').style.color='',5000);
+      }
+    };
+    ws.onclose=()=>{ws=null;wsTimer=setTimeout(()=>{refresh();},3000);};
+  }catch(e){/* 서버 다운 시 refresh가 재시도 */}
+}
+
+async function ctl(ep){
+  const btns=document.querySelectorAll('button');btns.forEach(b=>b.disabled=true);
+  try{
+    const r=await fetch(ep,{method:'POST'});
+    if(!r.ok) throw new Error(await r.text());
+    toast(ep.includes('stop')?'종료 완료 — 메모리 반납':ep.includes('start')?'기동 완료':'명령 완료');
+  }catch(e){ toast('실패: '+e.message,false); }
+  btns.forEach(b=>b.disabled=false); refresh();
+}
+async function restart(){
+  const btns=document.querySelectorAll('button');btns.forEach(b=>b.disabled=true);
+  try{ await fetch('/api/stop',{method:'POST'}); await fetch('/api/start',{method:'POST'}); toast('재시작 완료'); }
+  catch(e){ toast('재시작 실패',false); }
+  btns.forEach(b=>b.disabled=false); refresh();
+}
+</script>
+</body>
+</html>
