@@ -12,12 +12,28 @@ ComfyUI 런처 — **GUI 대시보드 + 헤드리스 CLI** 가 내장된 단일 
 - **진행 상황 트래킹** — 대기열(실행/대기 워크플로우 목록) 폴링 + ComfyUI `/ws` websocket 실시간
   샘플링 진행률/노드 실행 이벤트 (대시보드에서 프로그레스 바)
 
-## 빌드
+## 빌드 (크로스플랫폼 — 표준 라이브러리만 사용해 교차컴파일 가능)
 
 ```bash
 cd launcher
-go build -o comfy-launcher .
+go build -o comfy-launcher .                      # 현재 플랫폼 (macOS/Linux)
+GOOS=windows GOARCH=amd64 go build -o comfy-launcher.exe .   # Windows exe
+GOOS=windows GOARCH=arm64 go build -o comfy-launcher-arm64.exe .
 ```
+
+## 플랫폼 지원 매트릭스
+
+| 기능 | macOS | Windows | Linux |
+| --- | --- | --- | --- |
+| start/stop/restart/free | ✅ (setsid, 프로세스 그룹 SIGTERM→KILL) | ✅ (CREATE_NEW_PROCESS_GROUP, `taskkill /T /F`) | ✅ |
+| PID 탐색 | `lsof` | `netstat -ano` | `lsof` |
+| 프로세스 메모리 | `footprint` (통합 메모리) | `tasklist` (작업 세트) | `ps` RSS |
+| venv 파이썬 | `.venv/bin/python3` | `.venv/Scripts/python.exe` | `.venv/bin/python3` |
+| MPS 폴백 env | `PYTORCH_ENABLE_MPS_FALLBACK=1` | — (미설정) | — |
+
+Windows 실기 검증 전 상태이며(교차컴파일·정적 검증 완료), 첫 Windows 사용 시
+`comfy-launcher status` 동작부터 확인을 권장한다. 네이티브 창 앱 전환 검토는
+`docs/native-gui-review.md` 참고.
 
 ## 사용
 

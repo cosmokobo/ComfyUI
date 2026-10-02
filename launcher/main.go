@@ -25,7 +25,6 @@ import (
 	"path/filepath"
 	"strconv"
 	"strings"
-	"syscall"
 	"time"
 )
 
@@ -36,59 +35,6 @@ const defaultComfyPort = 8188
 const defaultDashPort = 8280
 
 // ── 공통 유틸 ──────────────────────────────────────────────────────────────
-
-func findListeningPID(port int) int {
-	out, err := exec.Command("lsof", "-ti", fmt.Sprintf("TCP:%d", port), "-sTCP:LISTEN").Output()
-	if err != nil {
-		return 0
-	}
-	for _, line := range strings.Fields(string(out)) {
-		if pid, err := strconv.Atoi(line); err == nil {
-			return pid
-		}
-	}
-	return 0
-}
-
-// physFootprintMB — macOS `footprint` 명령으로 통합 메모리 물리 풋프린트(MB)를 잰다.
-// (MPS 통합 메모리는 RSS에 반영되지 않으므로 footprint를 쓴다 — manage_comfyui.py와 동일 기준)
-func physFootprintMB(pid int) float64 {
-	if pid <= 0 {
-		return 0
-	}
-	out, err := exec.Command("footprint", strconv.Itoa(pid)).Output()
-	if err != nil {
-		return rssMB(pid)
-	}
-	for _, line := range strings.Split(string(out), "\n") {
-		line = strings.TrimSpace(line)
-		if strings.HasPrefix(line, "footprint:") {
-			return parseSizeMB(strings.TrimSpace(strings.TrimPrefix(line, "footprint:")))
-		}
-	}
-	// 일부 버전은 마지막 줄에 요약이 없다 — "Physical footprint" 라인 탐색
-	for _, line := range strings.Split(string(out), "\n") {
-		if strings.Contains(line, "Physical footprint") {
-			parts := strings.SplitN(line, ":", 2)
-			if len(parts) == 2 {
-				return parseSizeMB(strings.TrimSpace(parts[1]))
-			}
-		}
-	}
-	return rssMB(pid)
-}
-
-func rssMB(pid int) float64 {
-	out, err := exec.Command("ps", "-o", "rss=", "-p", strconv.Itoa(pid)).Output()
-	if err != nil {
-		return 0
-	}
-	kb, err := strconv.Atoi(strings.TrimSpace(string(out)))
-	if err != nil {
-		return 0
-	}
-	return float64(kb) / 1024
-}
 
 func parseSizeMB(s string) float64 {
 	s = strings.TrimSpace(s)
@@ -109,6 +55,10 @@ func parseSizeMB(s string) float64 {
 	default:
 		return val
 	}
+}
+
+func statFile(path string) (any, error) {
+	return os.Stat(path)
 }
 
 func getJSON(url string, out any, timeout time.Duration) error {
@@ -274,10 +224,7 @@ func (l *launcher) start() error {
 	if _, err := os.Stat(mainPy); err != nil {
 		return fmt.Errorf("main.py not found in %s", l.comfyDir)
 	}
-	pythonBin := filepath.Join(l.comfyDir, ".venv", "bin", "python3")
-	if _, err := os.Stat(pythonBin); err != nil {
-		pythonBin = "python3"
-	}
+	pythonBin := venvPython(l.comfyDir)
 	logPath := filepath.Join(l.comfyDir, "comfyui_service.log")
 	f, err := os.OpenFile(logPath, os.O_APPEND|os.O_CREATE|os.O_WRONLY, 0o644)
 	if err != nil {
@@ -290,8 +237,8 @@ func (l *launcher) start() error {
 	cmd.Dir = l.comfyDir
 	cmd.Stdout = f
 	cmd.Stderr = f
-	cmd.SysProcAttr = &syscall.SysProcAttr{Setsid: true}
-	cmd.Env = append(os.Environ(), "PYTORCH_ENABLE_MPS_FALLBACK=1")
+	detach(cmd)
+	cmd.Env = append(os.Environ(), platformPythonEnv()...)
 	if err := cmd.Start(); err != nil {
 		return err
 	}
@@ -316,9 +263,8 @@ func (l *launcher) stop() error {
 		return nil
 	}
 	before := physFootprintMB(pid)
-	fmt.Printf("Stopping ComfyUI (PID %d, Footprint %.0fMB)...\n", pid, before)
-	syscall.Kill(-pid, syscall.SIGTERM) // 프로세스 그룹 종료
-	syscall.Kill(pid, syscall.SIGTERM)
+	fmt.Printf("Stopping ComfyUI (PID %d, Memory %.0fMB)...\n", pid, before)
+	terminateProcessTree(pid)
 	t0 := time.Now()
 	for time.Since(t0) < 30*time.Second {
 		time.Sleep(time.Second)
@@ -328,11 +274,10 @@ func (l *launcher) stop() error {
 			return nil
 		}
 	}
-	syscall.Kill(-pid, syscall.SIGKILL)
-	syscall.Kill(pid, syscall.SIGKILL)
+	killProcessTree(pid)
 	time.Sleep(2 * time.Second)
 	if findListeningPID(l.comfyPort) == 0 {
-		fmt.Println("[SUCCESS] ComfyUI stopped (SIGKILL).")
+		fmt.Println("[SUCCESS] ComfyUI stopped (force).")
 		return nil
 	}
 	return fmt.Errorf("failed to stop PID %d", pid)
@@ -397,7 +342,7 @@ func (l *launcher) serveDashboard(port int, open bool) error {
 	url := fmt.Sprintf("http://%s", addr)
 	fmt.Printf("comfy-launcher dashboard: %s  (ComfyUI: %s, dir: %s)\n", url, l.baseURL(), l.comfyDir)
 	if open {
-		exec.Command("open", url).Start()
+		openBrowser(url)
 	}
 	return http.Serve(ln, mux)
 }
