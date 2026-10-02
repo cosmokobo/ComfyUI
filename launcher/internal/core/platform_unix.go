@@ -2,10 +2,11 @@
 
 // 유닉스(macOS/Linux) 플랫폼 구현 — PID 탐색(lsof), 메모리(footprint/ps),
 // 프로세스 그룹 종료(signal), 분리 기동(setsid), 브라우저(open/xdg-open).
-package main
+package core
 
 import (
 	"fmt"
+	"os"
 	"os/exec"
 	"runtime"
 	"strconv"
@@ -77,7 +78,7 @@ func detach(cmd *exec.Cmd) {
 // venvPython — 가상환경 파이썬 경로 (유닉스 레이아웃).
 func venvPython(comfyDir string) string {
 	candidate := comfyDir + "/.venv/bin/python3"
-	if _, err := statFile(candidate); err == nil {
+	if _, err := os.Stat(candidate); err == nil {
 		return candidate
 	}
 	return "python3"
@@ -92,7 +93,7 @@ func platformPythonEnv() []string {
 }
 
 // openBrowser — 기본 브라우저로 URL 열기.
-func openBrowser(url string) {
+func OpenBrowser(url string) {
 	switch runtime.GOOS {
 	case "darwin":
 		exec.Command("open", url).Start()

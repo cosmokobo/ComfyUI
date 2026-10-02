@@ -35,6 +35,18 @@ Windows 실기 검증 전 상태이며(교차컴파일·정적 검증 완료), �
 `comfy-launcher status` 동작부터 확인을 권장한다. 네이티브 창 앱 전환 검토는
 `docs/native-gui-review.md` 참고.
 
+## 네이티브 창 앱 (Wails GUI)
+
+```bash
+cd gui
+wails build            # → gui/build/bin/comfy-launcher.app  (macOS)
+# Windows: Windows 머신/CI에서 동일 명령 → comfy-launcher.exe
+```
+
+웹 대시보드와 동일한 UI를 독립 창 앱으로 띄운다 (본체 로직 internal/core 공유,
+통신은 Go 바인딩, 진행률 websocket은 WebView가 서버 직접 구독).
+macOS 배포 시 서명·공증(notarization) 권장, Windows는 WebView2 런타임 필요(Win10/11 기본 내장).
+
 ## 사용
 
 ### GUI (대시보드)

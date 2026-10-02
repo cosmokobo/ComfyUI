@@ -2,10 +2,11 @@
 
 // Windows 구현 — PID 탐색(netstat -ano), 메모리(tasklist), 트리 종료(taskkill /T),
 // 분리 기동(CREATE_NEW_PROCESS_GROUP), 브라우저(cmd /c start).
-package main
+package core
 
 import (
 	"fmt"
+	"os"
 	"os/exec"
 	"strconv"
 	"strings"
@@ -77,7 +78,7 @@ func detach(cmd *exec.Cmd) {
 // venvPython — 가상환경 파이썬 경로 (Windows 레이아웃).
 func venvPython(comfyDir string) string {
 	candidate := comfyDir + "\\.venv\\Scripts\\python.exe"
-	if _, err := statFile(candidate); err == nil {
+	if _, err := os.Stat(candidate); err == nil {
 		return candidate
 	}
 	return "python"
@@ -87,6 +88,6 @@ func venvPython(comfyDir string) string {
 func platformPythonEnv() []string { return nil }
 
 // openBrowser — 기본 브라우저로 URL 열기.
-func openBrowser(url string) {
+func OpenBrowser(url string) {
 	exec.Command("cmd", "/c", "start", "", url).Start()
 }
